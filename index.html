@@ -265,12 +265,13 @@
     <div id="reader"></div>
     <div class="warn" id="tidHint" style="display:none;background:rgba(245,180,0,.12);border-color:rgba(245,180,0,.4);color:var(--accent);margin-top:10px;">
       <div style="margin-bottom:8px;">Barcode captured. Scan the TID as a code, snap a photo of it, or type it in.</div>
-      <div style="display:flex;gap:8px;margin-bottom:8px;">
-        <input type="text" id="manualTidInput" placeholder="TID number"
+      <div style="display:flex;gap:8px;margin-bottom:4px;">
+        <input type="text" id="manualTidInput" placeholder="8-digit TID" inputmode="numeric" pattern="[0-9]*" maxlength="8"
           style="flex:1;background:#12151A;border:1px solid var(--panel-border);border-radius:7px;
           padding:8px 10px;color:var(--text);font-family:var(--mono);font-size:13px;">
         <button class="btn-existing" id="manualTidBtn" type="button" style="flex-shrink:0;">Save</button>
       </div>
+      <div id="tidDigitCount" style="font-size:11px;color:var(--muted);margin-bottom:8px;">0 / 8 digits</div>
       <div style="display:flex;gap:8px;">
         <button class="btn-existing" id="cancelTidBtn" type="button" style="flex:1;">Cancel</button>
         <button class="btn-existing" id="scanTextBtn" type="button" style="flex:1;">📷 Scan Text</button>
@@ -446,6 +447,7 @@ const manualTidBtn = document.getElementById('manualTidBtn');
 const scanTextBtn = document.getElementById('scanTextBtn');
 const tidPhotoInput = document.getElementById('tidPhotoInput');
 const cancelTidBtn = document.getElementById('cancelTidBtn');
+const tidDigitCount = document.getElementById('tidDigitCount');
 
 // default date = today
 dateInput.value = new Date().toISOString().slice(0,10);
@@ -679,6 +681,7 @@ function beginAwaitingTID(barcode){
   awaitingTID = true;
   lastCode = null;
   manualTidInput.value = '';
+  updateTidDigitCount();
   tidHint.style.display = 'block';
   setStatus('busy', 'Scan the TID…');
 }
@@ -699,6 +702,18 @@ cancelTidBtn.addEventListener('click', () => {
   setStatus('ok', 'Synced');
 });
 
+/* ---------------- TID digit counter ---------------- */
+function updateTidDigitCount(){
+  const digits = manualTidInput.value.replace(/[^0-9]/g, '').length;
+  tidDigitCount.textContent = digits + ' / 8 digits';
+  tidDigitCount.style.color = digits === 8 ? 'var(--success)' : 'var(--muted)';
+}
+manualTidInput.addEventListener('input', () => {
+  // keep the field numeric-only even if a keyboard lets other characters through
+  manualTidInput.value = manualTidInput.value.replace(/[^0-9]/g, '').slice(0, 8);
+  updateTidDigitCount();
+});
+
 /* ---------------- TID photo-to-text (OCR) ---------------- */
 scanTextBtn.addEventListener('click', () => tidPhotoInput.click());
 
@@ -713,14 +728,22 @@ tidPhotoInput.addEventListener('change', async () => {
 
   try{
     const { data } = await Tesseract.recognize(file, 'eng', {
-      tessedit_char_whitelist: '0123456789'
+      tessedit_char_whitelist: '0123456789',
+      tessedit_pageseg_mode: '7' // treat the image as one line of text — much more accurate for a short printed number than a full page
     });
-    const digits = (data.text || '').replace(/[^0-9]/g, '');
+    const rawText = data.text || '';
+    // prefer a clean, contiguous 8-digit run (the actual TID shape);
+    // fall back to every digit found if no exact 8-digit run is present
+    const eightDigitMatch = rawText.match(/\d{8}/);
+    const digits = eightDigitMatch ? eightDigitMatch[0] : rawText.replace(/[^0-9]/g, '').slice(0, 8);
+
     if(digits){
       manualTidInput.value = digits;
+      updateTidDigitCount();
       manualTidInput.focus();
+      manualTidInput.select();
     } else {
-      alert('Could not read a number from that photo. Try a clearer, closer shot, or type it in manually.');
+      alert('Could not read a number from that photo. Try a clearer, closer shot with just the TID digits in frame, or type it in manually.');
     }
   }catch(e){
     alert('Text scan failed. Please type the TID manually.');
