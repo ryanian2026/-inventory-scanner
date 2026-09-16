@@ -9,6 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
   :root{
     --bg:#14171A;
@@ -250,7 +251,11 @@
     </div>
     <div class="field">
       <label for="deviceInput">Device</label>
-      <input type="text" id="deviceInput" placeholder="e.g. POS Terminal, Printer">
+      <div class="client-row">
+        <input type="text" id="deviceInput" placeholder="Tap Select Device" readonly>
+        <button class="btn-existing" id="selectDeviceBtn" type="button">Select Device</button>
+      </div>
+      <div id="integrationInfo" style="display:none;font-size:12px;color:var(--muted);margin-top:6px;"></div>
     </div>
   </div>
 
@@ -258,6 +263,17 @@
 
   <div class="card scan-panel" id="scanPanel">
     <div id="reader"></div>
+    <div class="warn" id="tidHint" style="display:none;background:rgba(245,180,0,.12);border-color:rgba(245,180,0,.4);color:var(--accent);margin-top:10px;">
+      <div style="margin-bottom:8px;">Barcode captured. Scan the TID as a code, snap a photo of it, or type it in.</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px;">
+        <input type="text" id="manualTidInput" placeholder="TID number"
+          style="flex:1;background:#12151A;border:1px solid var(--panel-border);border-radius:7px;
+          padding:8px 10px;color:var(--text);font-family:var(--mono);font-size:13px;">
+        <button class="btn-existing" id="manualTidBtn" type="button" style="flex-shrink:0;">Save</button>
+      </div>
+      <button class="btn-existing" id="scanTextBtn" type="button" style="width:100%;">📷 Scan Text</button>
+      <input type="file" id="tidPhotoInput" accept="image/*" capture="environment" style="display:none;">
+    </div>
     <div class="count-row">
       <div>
         <div class="n" id="scanCount">0</div>
@@ -288,19 +304,107 @@
   </div>
 </div>
 
+<div class="sheet-backdrop" id="dupBackdrop">
+  <div class="sheet">
+    <h2>Duplicate entry</h2>
+    <p id="dupMessage" style="font-size:14px;color:var(--muted);margin:0 0 16px;line-height:1.5;"></p>
+    <div style="display:flex;gap:10px;">
+      <button class="btn btn-new" id="dupDiscardBtn" type="button">Discard</button>
+      <button class="btn btn-start" id="dupProceedBtn" type="button">Proceed anyway</button>
+    </div>
+  </div>
+</div>
+
+<div class="sheet-backdrop" id="deviceBackdrop">
+  <div class="sheet">
+    <h2>Select device</h2>
+    <input type="text" id="deviceSearchInput" placeholder="Search devices…"
+      style="width:100%;background:#12151A;border:1px solid var(--panel-border);border-radius:7px;
+      padding:10px 12px;color:var(--text);font-family:var(--sans);font-size:14px;margin-bottom:10px;">
+    <ul class="sheet-list" id="deviceSheetList"></ul>
+    <button class="sheet-close" id="deviceCloseBtn" type="button">Cancel</button>
+  </div>
+</div>
+
+<div class="sheet-backdrop" id="integrationBackdrop">
+  <div class="sheet">
+    <h2>Integration Type?</h2>
+    <ul class="sheet-list" id="integrationSheetList"></ul>
+    <button class="sheet-close" id="integrationCloseBtn" type="button">Cancel</button>
+  </div>
+</div>
+
 <script>
 /* =========================================================
    CONFIG — paste your deployed Apps Script Web App URL here
    ========================================================= */
-const API_URL = "https://script.google.com/macros/s/AKfycbwNwuoaJNyCtz-tJt6wZvA1qha3ayggbK68YIK_0QHVplJtikBs4FjJzJgsZrpnizq1DQ/exec";
+const API_URL = "PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE";
+
+const DEVICE_LIST = [
+  "Sunmi P2 Smart Pos",
+  "Sunmi L1522 T2",
+  "Sunmi T3522 T2",
+  "Sun L3561 D2S Kds",
+  "Sun Nt311 80Mm Kitchen Cloud Prntr Wifi",
+  "Sunmi T2S 15.6 L1561",
+  "Sunmi T2S L1562",
+  "Swan 1-As443-Android 11",
+  "Sun D2 Mini T1711 10.1",
+  "Sunmi Tf701 M2 Max 10.1",
+  "Sunmi Nc010 Cash Drawer Plastic & Metalc",
+  "Sunmi 2D Handheld Scanner - Ns021",
+  "Sunmi K2 Floor Stand With Table,1Upright",
+  "Sun Nd0S0 M2 Max Cradle 1Xlan 2Xusb Rj12",
+  "Sunmi P3 Air 4 +64Gb 4G Uk Plug P07190019",
+  "Sun P3 Air Anrd 4G 4+64Gb W/ Scnr Uk Plug",
+  "Hand Strip For Sunmi P3 Air C11000007",
+  "Sun P3 Air 1- Slot Chargng Base C14004134",
+  "Sunmi W1 Pro Router Blk Fw010 2.4/5Ghz",
+  "Sunmi P3H Dual Screen",
+  "Sunmi P3 Air 4- Slot Chargng Base C14004135",
+  "Sunm K2 Dsply 15.6 Print Scanner",
+  "Imin Swan1 Display Scrn 10.1",
+  "Imin Swan1 15.6\" Andrd 4+32Gb Ts Wifi Bt",
+  "Imin-K2",
+  "Imin Crane1 (16\")Andrd 13(4Gb+64Gb)",
+  "Imin Crane1 (21.5\")Andrd 13(4Gb+64Gb)",
+  "Imin Falcon1,10.1\" Andrd,4Gb+32,Pr80M,4G",
+  "Imin Swift2 (6.5\")Andrd(2Gb+16G)Sim,Wifi",
+  "Imin D4-504,15.6\"+10.1\"(4Gb+32)A11,Pr80M",
+  "Imin Crane1 (16\") Andrd 13(8Gb+128Gb)",
+  "Imin Crane1 Floor Stand",
+  "Imin Crane1 Table Stand",
+  "Imin Crane1 Nfc Module",
+  "Imin Crane1 Status  Light 2 Color Led",
+  "Imin Swift2 Cardle Supportcharg/Type-C",
+  "Imin Cashier Stand",
+  "Ck-410 Cash Drawer  Plastic And Metallic",
+  "Iceirp260+ Thrml Prntr Papr=80Mm Usb&Eth",
+  "Vesa Mount Wall Brackt,1Bx102-P 10\"To32\""
+];
+
+const TID_TRIGGER_DEVICES = [
+  "Sunmi P2 Smart Pos",
+  "Sunmi P3 Air 4 +64Gb 4G Uk Plug P07190019",
+  "Sun P3 Air Anrd 4G 4+64Gb W/ Scnr Uk Plug",
+  "Sunmi P3H Dual Screen"
+];
+const INTEGRATION_OPTIONS = ["App2App", "Device2Device", "Standalone Payment", "Standalone POS"];
+const TID_REQUIRED_TYPES = ["App2App", "Device2Device", "Standalone Payment"];
 
 /* ---------------- state ---------------- */
 let html5QrCode = null;
 let scanning = false;
-let sessionScans = [];      // {barcode, time, synced}
+let sessionScans = [];      // {barcode, tid, time, synced}
 let lastCode = null;
 let lastCodeAt = 0;
 const COOLDOWN_MS = 1200;
+
+let integrationType = null;   // null | 'None' | one of INTEGRATION_OPTIONS
+let requiresTID = false;
+let pendingBarcode = null;
+let awaitingTID = false;
+let pendingDupMode = 'normal'; // 'normal' | 'tid' — which flow the open duplicate modal belongs to
 
 const dateInput = document.getElementById('dateInput');
 const clientInput = document.getElementById('clientInput');
@@ -320,6 +424,24 @@ const selectExistingBtn = document.getElementById('selectExistingBtn');
 const sheetBackdrop = document.getElementById('sheetBackdrop');
 const clientSheetList = document.getElementById('clientSheetList');
 const sheetCloseBtn = document.getElementById('sheetCloseBtn');
+const dupBackdrop = document.getElementById('dupBackdrop');
+const dupMessage = document.getElementById('dupMessage');
+const dupDiscardBtn = document.getElementById('dupDiscardBtn');
+const dupProceedBtn = document.getElementById('dupProceedBtn');
+const selectDeviceBtn = document.getElementById('selectDeviceBtn');
+const deviceBackdrop = document.getElementById('deviceBackdrop');
+const deviceSheetList = document.getElementById('deviceSheetList');
+const deviceCloseBtn = document.getElementById('deviceCloseBtn');
+const deviceSearchInput = document.getElementById('deviceSearchInput');
+const integrationInfo = document.getElementById('integrationInfo');
+const integrationBackdrop = document.getElementById('integrationBackdrop');
+const integrationSheetList = document.getElementById('integrationSheetList');
+const integrationCloseBtn = document.getElementById('integrationCloseBtn');
+const tidHint = document.getElementById('tidHint');
+const manualTidInput = document.getElementById('manualTidInput');
+const manualTidBtn = document.getElementById('manualTidBtn');
+const scanTextBtn = document.getElementById('scanTextBtn');
+const tidPhotoInput = document.getElementById('tidPhotoInput');
 
 // default date = today
 dateInput.value = new Date().toISOString().slice(0,10);
@@ -405,6 +527,87 @@ selectExistingBtn.addEventListener('click', openSheet);
 sheetCloseBtn.addEventListener('click', closeSheet);
 sheetBackdrop.addEventListener('click', e => { if(e.target === sheetBackdrop) closeSheet(); });
 
+/* ---------------- device picker ---------------- */
+function renderDeviceList(filter){
+  const q = (filter || '').trim().toLowerCase();
+  const filtered = DEVICE_LIST.filter(d => d.toLowerCase().includes(q));
+  deviceSheetList.innerHTML = '';
+  if(filtered.length === 0){
+    deviceSheetList.innerHTML = '<li style="color:var(--muted)">No matches.</li>';
+    return;
+  }
+  filtered.forEach(name => {
+    const li = document.createElement('li');
+    li.textContent = name;
+    li.addEventListener('click', () => {
+      deviceInput.value = name;
+      closeDeviceSheet();
+      integrationType = null;
+      requiresTID = false;
+      pendingBarcode = null;
+      awaitingTID = false;
+      updateIntegrationInfo();
+      if(TID_TRIGGER_DEVICES.includes(name)){
+        openIntegrationSheet();
+      }
+    });
+    deviceSheetList.appendChild(li);
+  });
+}
+function openDeviceSheet(){
+  deviceBackdrop.classList.add('open');
+  deviceSearchInput.value = '';
+  renderDeviceList('');
+  setTimeout(() => deviceSearchInput.focus(), 50);
+}
+function closeDeviceSheet(){ deviceBackdrop.classList.remove('open'); }
+selectDeviceBtn.addEventListener('click', openDeviceSheet);
+deviceCloseBtn.addEventListener('click', closeDeviceSheet);
+deviceBackdrop.addEventListener('click', e => { if(e.target === deviceBackdrop) closeDeviceSheet(); });
+deviceSearchInput.addEventListener('input', () => renderDeviceList(deviceSearchInput.value));
+
+/* ---------------- integration type picker ---------------- */
+function renderIntegrationList(){
+  integrationSheetList.innerHTML = '';
+  INTEGRATION_OPTIONS.forEach(opt => {
+    const li = document.createElement('li');
+    li.textContent = opt;
+    li.addEventListener('click', () => {
+      setIntegrationType(opt);
+      integrationBackdrop.classList.remove('open');
+    });
+    integrationSheetList.appendChild(li);
+  });
+}
+function openIntegrationSheet(){
+  if(scanning) return;
+  renderIntegrationList();
+  integrationBackdrop.classList.add('open');
+}
+integrationCloseBtn.addEventListener('click', () => integrationBackdrop.classList.remove('open'));
+integrationBackdrop.addEventListener('click', e => { if(e.target === integrationBackdrop) integrationBackdrop.classList.remove('open'); });
+
+function setIntegrationType(opt){
+  if(opt === 'Standalone POS'){
+    integrationType = 'None';
+    requiresTID = false;
+  } else {
+    integrationType = opt;
+    requiresTID = TID_REQUIRED_TYPES.includes(opt);
+  }
+  updateIntegrationInfo();
+}
+function updateIntegrationInfo(){
+  if(integrationType){
+    integrationInfo.style.display = 'block';
+    integrationInfo.innerHTML = `Integration Type: <b>${escapeHtml(integrationType)}</b> &middot; <span style="color:var(--accent);text-decoration:underline;">change</span>`;
+  } else {
+    integrationInfo.style.display = 'none';
+    integrationInfo.innerHTML = '';
+  }
+}
+integrationInfo.addEventListener('click', openIntegrationSheet);
+
 /* ---------------- scan list render ---------------- */
 function renderScanList(){
   scanCount.textContent = sessionScans.length;
@@ -412,7 +615,8 @@ function renderScanList(){
   scanList.innerHTML = '';
   sessionScans.slice().reverse().forEach(s => {
     const li = document.createElement('li');
-    li.innerHTML = `<span class="code">${escapeHtml(s.barcode)}</span>
+    const tidPart = s.tid ? ` <span style="color:var(--muted)">&rarr; TID ${escapeHtml(s.tid)}</span>` : '';
+    li.innerHTML = `<span class="code">${escapeHtml(s.barcode)}${tidPart}</span>
       <span class="meta">${s.time}${s.synced ? '' : ' <span class="pending">&middot; pending</span>'}</span>`;
     scanList.appendChild(li);
   });
@@ -421,13 +625,114 @@ function escapeHtml(str){
   return str.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+/* ---------------- duplicate detection ---------------- */
+let awaitingDecision = false;
+let pendingCode = null;
+
+async function checkDuplicate(code){
+  if(API_URL.indexOf('PASTE_YOUR') === 0) return { exists:false };
+  try{
+    const res = await fetch(API_URL + '?action=check&code=' + encodeURIComponent(code));
+    return await res.json();
+  }catch(e){
+    return { exists:false }; // don't block scanning if the check itself fails
+  }
+}
+
+function showDuplicateModal(code, info, mode){
+  awaitingDecision = true;
+  pendingCode = code;
+  pendingDupMode = mode || 'normal';
+  let detail = 'This item was already recorded';
+  if(info.client) detail += ` for ${info.client}`;
+  if(info.date) detail += ` on ${info.date}`;
+  if(info.device) detail += ` (${info.device})`;
+  detail += '.';
+  dupMessage.textContent = detail;
+  dupBackdrop.classList.add('open');
+}
+function closeDupModal(){
+  dupBackdrop.classList.remove('open');
+  awaitingDecision = false;
+  pendingCode = null;
+}
+dupProceedBtn.addEventListener('click', async () => {
+  const code = pendingCode;
+  const mode = pendingDupMode;
+  closeDupModal();
+  if(!code) return;
+  if(mode === 'tid'){
+    beginAwaitingTID(code);
+  } else {
+    await saveScan(code, '');
+  }
+});
+dupDiscardBtn.addEventListener('click', closeDupModal);
+
+/* ---------------- TID capture ---------------- */
+function beginAwaitingTID(barcode){
+  pendingBarcode = barcode;
+  awaitingTID = true;
+  lastCode = null;
+  manualTidInput.value = '';
+  tidHint.style.display = 'block';
+  setStatus('busy', 'Scan the TID…');
+}
+function finishAwaitingTID(){
+  pendingBarcode = null;
+  awaitingTID = false;
+  tidHint.style.display = 'none';
+}
+manualTidBtn.addEventListener('click', async () => {
+  const tid = manualTidInput.value.trim();
+  if(!tid || !pendingBarcode) return;
+  const barcode = pendingBarcode;
+  finishAwaitingTID();
+  await saveScan(barcode, tid);
+});
+
+/* ---------------- TID photo-to-text (OCR) ---------------- */
+scanTextBtn.addEventListener('click', () => tidPhotoInput.click());
+
+tidPhotoInput.addEventListener('change', async () => {
+  const file = tidPhotoInput.files[0];
+  tidPhotoInput.value = ''; // allow re-selecting the same photo later
+  if(!file) return;
+
+  scanTextBtn.disabled = true;
+  const originalLabel = scanTextBtn.textContent;
+  scanTextBtn.textContent = 'Reading…';
+
+  try{
+    const { data } = await Tesseract.recognize(file, 'eng', {
+      tessedit_char_whitelist: '0123456789'
+    });
+    const digits = (data.text || '').replace(/[^0-9]/g, '');
+    if(digits){
+      manualTidInput.value = digits;
+      manualTidInput.focus();
+    } else {
+      alert('Could not read a number from that photo. Try a clearer, closer shot, or type it in manually.');
+    }
+  }catch(e){
+    alert('Text scan failed. Please type the TID manually.');
+  }
+
+  scanTextBtn.disabled = false;
+  scanTextBtn.textContent = originalLabel;
+});
+
 /* ---------------- scanning ---------------- */
 function sessionValid(){
-  return dateInput.value && clientInput.value.trim() && locationInput.value.trim() && deviceInput.value.trim();
+  const base = dateInput.value && clientInput.value.trim() && locationInput.value.trim() && deviceInput.value.trim();
+  if(!base) return false;
+  if(TID_TRIGGER_DEVICES.includes(deviceInput.value.trim()) && !integrationType) return false;
+  return true;
 }
 
 async function onScanSuccess(decodedText){
   const now = Date.now();
+  if(awaitingDecision) return;
   if(decodedText === lastCode && (now - lastCodeAt) < COOLDOWN_MS) return;
   lastCode = decodedText;
   lastCodeAt = now;
@@ -435,14 +740,38 @@ async function onScanSuccess(decodedText){
   if(navigator.vibrate) navigator.vibrate(60);
   beep();
 
+  if(requiresTID && awaitingTID){
+    if(decodedText === pendingBarcode) return; // ignore an accidental re-read of the same barcode
+    const barcode = pendingBarcode;
+    finishAwaitingTID();
+    await saveScan(barcode, decodedText);
+    return;
+  }
+
+  const dup = await checkDuplicate(decodedText);
+  if(dup && dup.exists){
+    showDuplicateModal(decodedText, dup, requiresTID ? 'tid' : 'normal');
+    return;
+  }
+
+  if(requiresTID){
+    beginAwaitingTID(decodedText);
+  } else {
+    await saveScan(decodedText, '');
+  }
+}
+
+async function saveScan(decodedText, tid){
   const row = {
     date: dateInput.value,
     client: clientInput.value.trim(),
     location: locationInput.value.trim(),
     device: deviceInput.value.trim(),
-    barcode: decodedText
+    barcode: decodedText,
+    integration: integrationType || '',
+    tid: tid || ''
   };
-  const entry = { barcode: decodedText, time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}), synced:false };
+  const entry = { barcode: decodedText, tid: tid || '', time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}), synced:false };
   sessionScans.push(entry);
   renderScanList();
 
@@ -481,6 +810,7 @@ async function startScanning(){
   validationWarn.style.display = 'none';
   dateInput.disabled = true; clientInput.disabled = true; locationInput.disabled = true; deviceInput.disabled = true;
   selectExistingBtn.disabled = true;
+  selectDeviceBtn.disabled = true;
 
   scanPanel.classList.add('active');
   startBtn.style.display = 'none';
@@ -516,6 +846,9 @@ async function stopScanning(){
     try{ await html5QrCode.stop(); html5QrCode.clear(); }catch(e){}
   }
   scanning = false;
+  pendingBarcode = null;
+  awaitingTID = false;
+  tidHint.style.display = 'none';
   resetScanUI();
 }
 
@@ -525,6 +858,7 @@ function resetScanUI(){
   doneBtn.style.display = 'none';
   dateInput.disabled = false; clientInput.disabled = false; locationInput.disabled = false; deviceInput.disabled = false;
   selectExistingBtn.disabled = false;
+  selectDeviceBtn.disabled = false;
 }
 
 function newEntry(){
@@ -535,6 +869,12 @@ function newEntry(){
   clientInput.value = '';
   locationInput.value = '';
   deviceInput.value = '';
+  integrationType = null;
+  requiresTID = false;
+  pendingBarcode = null;
+  awaitingTID = false;
+  updateIntegrationInfo();
+  tidHint.style.display = 'none';
   validationWarn.style.display = 'none';
   renderScanList();
 }
